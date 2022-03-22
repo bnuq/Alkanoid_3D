@@ -1,5 +1,5 @@
-Shader "myProject/renderBalls"
-{
+// Git Test
+Shader "myProject/renderBalls" {
     Properties
     {
         // ball 자체적으로 가지는 색깔
