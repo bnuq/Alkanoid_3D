@@ -34,7 +34,7 @@ Shader "Test/renderLine"
             float4 _MainTex_ST;
 
 
-
+            
             StructuredBuffer<float3> lineBuffer;
 
             v2f vert (uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID)
