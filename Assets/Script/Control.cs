@@ -160,13 +160,19 @@ public class Control : MonoBehaviour
         
         public Material lineMaterial;
 
+        //경계는 직육면체 모양
+        Vector3[] indexArray = new Vector3[8];  //직육면체의 각 점 위치를 저장
+
+        //직육면체의 각 선을 저장
+        //직육면체는 총 12 개의 선으로 구성되어 있으며
+        //각 선은 2개의 정점으로 구성된다
+        //따라서 12 * 2 = 24 개의 정점 배열로 구성
+        Vector3[] lineVertex = new Vector3[24];
+
         ComputeBuffer lineBuffer;
 
-        Vector3[] lineVertex = new Vector3[24];
-        Vector3[] indexArray = new Vector3[8];
-
     #endregion
-   
+
 
 
     //Start is called before the first frame update
@@ -421,7 +427,8 @@ public class Control : MonoBehaviour
     */
     void OnRenderObject()
     {
-        // plane 을 그리는 material 을 이용 
+        //plane 을 그리는 material 을 이용, shader 에서 pass 0 을 사용한다?
+        //어차피 renderPlane shader 내에서 pass 는 하나만 존재한다
         planeMaterial.SetPass(0);
         
         //이번에는 primitive 가 삼각형이라고 넘겨주네 => 버퍼에서 알아서 3개씩 끊어서 읽고
@@ -429,10 +436,13 @@ public class Control : MonoBehaviour
         //하나의 Plane 에는 quadNum 개의 quad 가 존재하므로, 6 * quadNum 개의 정점마다 끊어주어야 한다
         //endIndex = 총 그리는 procedural geometry 의 개수
         Graphics.DrawProceduralNow(MeshTopology.Triangles, 6 * quadNum, endIndex);
-
+                
         
-        //????
+        //경계선인 line 을 그린다
         lineMaterial.SetPass(0);
+        
+        //하나의 line 은 2 개의 vertex 로 구성되어 있으며
+        //경계선은 직육면체로 구성됨 => 12 개의 선으로 구성되어 있다
         Graphics.DrawProceduralNow(MeshTopology.Lines, 2, 12);
     }
  
@@ -446,7 +456,7 @@ public class Control : MonoBehaviour
 
 
 
-    void OnDestroy()    //Compute Buffer 제거해준다
+    void OnDestroy()    //프로그램 종료 시, Compute Buffer 제거
     {
         if (ballBuffer != null)
         {
@@ -497,10 +507,12 @@ public class Control : MonoBehaviour
 
         //공의 개수가 버퍼 사이즈를 넘어가는 경우, 2 가지 다 고려를 해야 한다
         //먼저 endIndex 가 버퍼 사이즈 자체를 넘어가는 경우
-        endIndex = (endIndex >= ballBufferSize) ? ballBufferSize : endIndex;
+        //endIndex = (endIndex >= ballBufferSize) ? ballBufferSize : endIndex;
 
-        //필요 없는 듯..?
+        
+        //버퍼 사이즈 고려할 필요 없이, 공의 개수가 최대 개수를 넘으면 그냥 무조건 최대 개수만 가지도록 한다
         endIndex = (endIndex >= ballsCountMax) ? ballsCountMax : endIndex;
+
 
         //새로운 정보를 구하고자 하는 공의 범위를 구했으니, compute shader 에 값을 갱신한다
         computeShader.SetInt("startIndex", startIndex);
@@ -532,23 +544,32 @@ public class Control : MonoBehaviour
         argsBuffer.SetData(args);
     }
 
+
+
     // 9.
-    void Drawlines()
+    void Drawlines() //공이 움직일 수 있는 경계를 그리는 데 필요한 데이터를 설정하는 함수
     {
+        //경계 직육면체의 선분 데이터를 GPU 에 넘겨줄 컴퓨트 버퍼
+        //한 점은 3*float 로 구성
+        //12개의 선분 표현을 위해 총 24개의 점 데이터를 저장해야 한다
         lineBuffer = new ComputeBuffer(24, 3 * sizeof(float));
 
+        //먼저 주어진 limitSize 정보를 바탕으로, 경계의 각 점 데이터를 초기화
+        //직육면체의 8 개 점의 위치를 직접 할당
+        //위
         indexArray[0] = new Vector3( -limitSize.x, +limitSize.y, -limitSize.z );
         indexArray[1] = new Vector3( -limitSize.x, +limitSize.y, +limitSize.z );
         indexArray[2] = new Vector3( +limitSize.x, +limitSize.y, +limitSize.z );
         indexArray[3] = new Vector3( +limitSize.x, +limitSize.y, -limitSize.z );
-        
+        //아래
         indexArray[4] = new Vector3( -limitSize.x, -limitSize.y, -limitSize.z );
         indexArray[5] = new Vector3( -limitSize.x, -limitSize.y, +limitSize.z );
         indexArray[6] = new Vector3( +limitSize.x, -limitSize.y, +limitSize.z );
         indexArray[7] = new Vector3( +limitSize.x, -limitSize.y, -limitSize.z );
 
-
-
+        //할당한 점의 위치를 바탕으로 직육면체의 각 선분을 지정한다
+        //선분은 시작점, 도착점 으로 구성된다
+        //위
         lineVertex[0] = indexArray[0];
         lineVertex[1] = indexArray[1];
         lineVertex[2] = indexArray[1];
@@ -557,7 +578,7 @@ public class Control : MonoBehaviour
         lineVertex[5] = indexArray[3];
         lineVertex[6] = indexArray[3];
         lineVertex[7] = indexArray[0];
-
+        //중간
         lineVertex[8] = indexArray[0];
         lineVertex[9] = indexArray[4];
         lineVertex[10] = indexArray[1];
@@ -566,7 +587,7 @@ public class Control : MonoBehaviour
         lineVertex[13] = indexArray[6];
         lineVertex[14] = indexArray[3];
         lineVertex[15] = indexArray[7];
-
+        //아래
         lineVertex[16] = indexArray[4];
         lineVertex[17] = indexArray[5];
         lineVertex[18] = indexArray[5];
@@ -576,14 +597,10 @@ public class Control : MonoBehaviour
         lineVertex[22] = indexArray[7];
         lineVertex[23] = indexArray[4];
 
-
-
+        //직접 초기화 한 선분 데이터를 컴퓨트 버퍼에 복사
         lineBuffer.SetData(lineVertex);
 
+        //선을 그릴 수 있게 Material 에 버퍼를 연결한다
         lineMaterial.SetBuffer("lineBuffer", lineBuffer);
-
-
-        
-
     }
 }
