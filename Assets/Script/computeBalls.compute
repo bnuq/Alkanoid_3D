@@ -1,40 +1,41 @@
-// Ball 에 대한 정보를 업데이트 하는 커널함수
-#pragma kernel assignBalls
-#pragma kernel moveBalls
+//Ball 에 대한 정보를 업데이트 하는 커널함수
+#pragma kernel moveBalls    //Ball 의 움직임 계산
+#pragma kernel assignBalls  //새로 추가된 Ball 의 정보를 계산
 
 
+//Ball 의 뒤에 붙는 Plane 을 계산
 #pragma kernel attachPlane
 
+
+/*
+커널 함수를 실행하는 각 그룹 당 할당된 스레드 개수
+나는 모든 커널 함수가 동일한 스레드 개수를 가지도록 하고 x 축 방향으로만 가지게 했다
+*/
 #define GROUP_SIZE 256
 
 
-// CPU 로 부터 한번만 넘겨 받음
-float3 limitSize; // 공이 움직일 수 있는 영역을 표현
-float quadNum;
+//CPU 로 부터 한번만 넘겨 받는 arguments
+float3 limitSize; //공이 움직일 수 있는 영역을 표현
+float quadNum;    //하나의 Plane 이 가지는 quad 개수
 
 
-// CPU 로 부터 매 프레임마다 넘겨 받음
+//CPU 로 부터 매 프레임마다 넘겨 받음
 float deltaTime;
 
 
-// CPU 에서 같이 계속 변해서 넘어올 수 있다
-float halfSize;
-
-float maxSpeed;
-float planeLength;
-
+//실행 도중, 언제든 지 값이 바뀔 수 있는 arguments
+float halfSize;     //Ball 의 반지름
+float maxSpeed;     //최대 속도
+float planeLength;  //Plane 의 길이
 
 
-
-// 정보를 구하고자 하는 공의 범위를 가리키는 인덱스
+//새로 추가된 Ball 의 인덱스 범위
 int startIndex;
 int endIndex;
 
 
-
-
-
-// 버퍼를 넘겨받기 위해서, ball 에 대한 구조를 먼저 정의한다.
+//버퍼를 통해 Ball 의 정보를 넘겨받기 위해서는, ball 에 대한 구조를 알아야 한다
+//스크립트와 동일한 구조를 가지는 ball struct 를 정의한다
 struct Ball
 {
     float3 position;
@@ -45,27 +46,25 @@ struct Ball
     float3 yBasis;
     float3 zBasis;
 };
-// CPU 로 부터 넘겨받는 버퍼
+//CPU 로 부터 넘겨받는 버퍼
+//읽고, 다시 버퍼에 쓸 수 있어야 하기 때문에 RW 를 사용
+//서로 다른 커널 함수끼리 버퍼의 내용을 주고 받을 수 있으므로 shared 사용
 shared RWStructuredBuffer<Ball> ballBuffer;
 
 
-
-
-// vertex 관련해서도 버퍼를 넘겨받기 위해, 구조를 먼저 정의한다
+//vertex 관련해서도 버퍼를 넘겨받기 위해, 구조를 먼저 정의한다
 struct Vertex
 {
     float3 position;
     float3 normal;
 };
-// CPU 로 부터 값을 넘겨받는 버퍼
+//CPU 로 부터 값을 넘겨받는 버퍼
+//동일한 이유로 shared, RW 사용
 shared RWStructuredBuffer<Vertex> vertexBuffer;
 
 
-
-
-
-// pseudo random
-// [0, 1] 범위의 값을 리턴한다
+//Make pseudo random
+//[0, 1] 범위의 값을 리턴한다
 float random (uint id, float seed) {
     const float a = 42.308;
     const float b = 18.263;
@@ -76,166 +75,137 @@ float random (uint id, float seed) {
 
 
 
+/* 이하 커널 함수들 */
 
 
-
-
-
+//[startIndex, endIndex) 범위 인덱스 Ball 에 데이터를 할당하는 커널 함수
 [numthreads(GROUP_SIZE, 1, 1)]
-void assignBalls (uint3 id : SV_DISPATCHTHREADID)
+void assignBalls (uint3 id : SV_DISPATCHTHREADID) //SV_DISPATCHTHREADID => 전체 그룹 내에서 해당 스레드의 id
 {
-
-    // startIndex 이상, endIndex 미만 내의 공들의 정보를 구하고 싶다
-    // => start Index <= id.x < end Number
-    // 즉 해당 스레드의 아이디가, 위의 범위에 해당하지 않으면 진행할 연산이 없다
+    /*
+    스레드 하나 = 버퍼의 Ball 하나 담당
+    스레드 id 와 버퍼의 인덱스는 같은 Ball 을 담당한다
+    */
+    //해당 스레드가 새로 생겨서, 값을 할당받을 공이 아니라면, 처리할 작업이 없다 => 종료
     if(id.x < (uint)startIndex || id.x >= (uint)endIndex) return;
 
-
-    /* 
-    ballBuffer[id.x].position = float3(0,0,0);
-    ballBuffer[id.x].velocity = float3(0,0,0);
-
-    ballBuffer[id.x].xBasis = float3(1,0,0);
-    ballBuffer[id.x].yBasis = float3(0,1,0);
-    ballBuffer[id.x].zBasis = float3(0,0,1);
- */
-
-
-    
-        
-
-    
-
-
+    //해당 스레드에 랜덤한 값을 하나 가져온다 => [0, 1] 범위 값
     float rndVal = random(id.x, deltaTime);
-    //float rndVal = 1.0f;
-
     
-
-
-/* 먼저 Ball Buffer 부터 채운다 */
-    // 해당 공의 정보는 (아이디 - startIndex)/2 의 몫 = 인덱스 인 공에서 가져올 수 있다`
-    // 업데이트 하는 내용
-    // position = 현재 공의 위치와 똑같이 한다
+    /* 
+        먼저 Ball Buffer 부터 채운다
+        
+        해당 공의 부모 공 인덱스 = (id - startIndex)/2
+    */
+    //위치 = 부모 공에서 갈라져서 나오기 때문에, 같은 위치를 가진다
     ballBuffer[id.x].position = ballBuffer[ (id.x-startIndex) / 2 ].position;
 
-
-
-    // velocity = 현재 공의 속도 방향에서 살짝 왼쪽, 오른쪽으로 비튼 방향을 준다
+    //velocity = 현재 공의 속도 방향에서 살짝 왼쪽 or 오른쪽으로 비튼 방향을 준다
+    //2개의 자식이 서로 다른 방향으로 속도를 가지도록 한다
     float flag = ((id.x-startIndex) % 2) == 0 ? -1 : 1;
-
-
-
-    // xBasis 말고 다른 방향으로도 랜덤한 값을 준다
-    ballBuffer[id.x].velocity = ballBuffer[ (id.x-startIndex) / 2 ].velocity 
+    
+    //부모 공의 속도 값을 기본적으로 가진다
+    //앞서 구한 랜덤 값을 이용해서 자식 공의 방향을 조금 수정한다
+    ballBuffer[id.x].velocity = ballBuffer[ (id.x-startIndex) / 2 ].velocity
+                                //부모 공의 모델 좌표계 값을 이용해서, 자식 공의 새로운 방향을 설정
+                                //x축 방향 = 나아가는 방향 기준 좌,우 를 의미 => flag 값을 이용해서 좌, 우 를 설정한다
                                 + flag * ballBuffer[ (id.x-startIndex) / 2 ].xBasis * rndVal
+                                        //랜덤 값이 [0,1] 범위 값이기에 y,z 축 방향으로 [-1, 1] 범위의 랜덤한 값을 곱해
+                                        //조금 다른 방향을 가지게 한다
                                         + ballBuffer[ (id.x-startIndex) / 2 ].yBasis * (rndVal * 2 - 1)
                                         + ballBuffer[ (id.x-startIndex) / 2 ].zBasis * (rndVal * 2 - 1);
-
-    
+    //방향이 0 이 되는 상황은 피한다    
     if( length(ballBuffer[id.x].velocity) == 0 ) ballBuffer[id.x].velocity = float3(1,1,1);
 
-    // 속도는 항상 정규화 시켜서 저장한다
+    //속도는 항상 정규화 시켜서 저장한다
     ballBuffer[id.x].velocity = normalize( ballBuffer[id.x].velocity );
 
-
-    // 속력은 각자 랜덤하게 설정한다
-    ballBuffer[id.x].speed = rndVal * maxSpeed;
+    //속력은 각자 랜덤하게 설정한다, 아예 움직이지 않는 상황은 피한다
+    ballBuffer[id.x].speed = (rndVal + 0.01) * maxSpeed;
     
-    
-
-    // 공의 월드 공간에서 좌표계 설정 => 업데이트한 속도를 바탕으로 설정한다
-    float3 UP = float3(0,1,0);
-    
-    ballBuffer[id.x].zBasis = normalize(ballBuffer[id.x].velocity);
+    //자식 공의 모델 좌표계 설정
+    //공의 월드 공간 좌표계 기준으로 설정 => 업데이트한 속도를 바탕으로 설정한다
+    float3 UP = float3(0,1,0); //월드 공간 기준 y축    
+    ballBuffer[id.x].zBasis = normalize(ballBuffer[id.x].velocity); //z = 나아가는 방향
     ballBuffer[id.x].xBasis = normalize(cross(UP, ballBuffer[id.x].zBasis));
     ballBuffer[id.x].yBasis = normalize(cross(ballBuffer[id.x].zBasis, ballBuffer[id.x].xBasis));
 
 
 
-
-/* 이후 Vertex Buffer 를 채운다 */
-    // 현재 ball 에 해당하는 vertex buffer 영역을 가져온다
+    /*
+    이후 Vertex Buffer 를 채운다
+    */
+    //현재 ball 에 해당하는 vertex buffer 인덱스를 가져온다
     int index = id.x * 6 * quadNum;
 
-
+    //Vertex Buffer 값 초기화
     for(int i = 0; i < 6 * quadNum; i++)
     {
-        // 정점의 위치는 현재의 위치로
+        //일단 모든 Plane의 정점의 위치는 현재의 위치로
         vertexBuffer[index + i].position = ballBuffer[id.x].position;
 
-        // 노멀 방향은 이전 공의 yBasis 와 동일하게
-        vertexBuffer[index + i].normal = ballBuffer[ (id.x-startIndex) / 2 ].yBasis;
+        //각 정점의 노멀 방향은 새로 만든 공의 yBasis 방향을 가지도록 한다
+        vertexBuffer[index + i].normal = ballBuffer[id.x].yBasis;
     }
 
 }
 
 
 
-
-
-
-
-
-
-// 공의 위치, 속도 벡터 모두 월드 공간에서의 값이라 가정하고 진행~
+//공의 움직임을 계산하는 커널 함수
+//공의 위치, 속도 벡터 모두 월드 공간 좌표계 기준 값이라 가정하고 진행한다
 [numthreads(GROUP_SIZE, 1, 1)]
 void moveBalls (uint3 id : SV_DISPATCHTHREADID)
 {
+    //담당 스레드가 그리려는 공보다 높은 숫자이면, 계산하지 않는다
+    if(id.x >= (uint)endIndex) return;
 
-    // 담당 스레드가 그리려는 공보다 높은 숫자이면, 계산하지 않는다
-    if( id.x > (uint)endIndex) return;
-
-
-
-    // 공을 가져와서
+    //계산하고자 하는 공에 대해서
     Ball ball = ballBuffer[id.x];
 
-
-
-    // 현재 공이 제한 영역내에 존재하는 지를 먼저 확인한다
+    //현재 공이 움직일 수 있는 영역내에 존재하는 지를 먼저 확인한다
     if(abs(ball.position.x) <= abs(limitSize.x) &&
        abs(ball.position.y) <= abs(limitSize.y) &&
-       abs(ball.position.z) <= abs(limitSize.z))
-    {
-        // 영역 내에 존재한다면, 현재 속도 방향과 속력값을 이용해서 이동한다
-        //ball.position += ball.velocity * ball.speed * deltaTime;
+       abs(ball.position.z) <= abs(limitSize.z)) {
+        //영역 내에 존재한다면, 따로 처리할 내용은 없다
     }
-    // 영역을 벗어난 경우에,
-    else
-    {
-        // 공의 위치, 속도 벡터 모두 월드 공간 기준
-        // 위치 벡터와 속도 벡터의 내적을 통해서, 공이 영역을 벗어낫지만 들어오는 중인지, 계속 벗어나는 중인지를 판단할 수 있다
+    //움직일 수 있는 영역을 벗어난 경우 => 영역 내로 다시 돌아와야 한다
+    else {
+        //공의 위치, 속도 벡터 모두 월드 공간 기준
+        /*
+        공이 정해진 영역을 벗어낫더라도
+        정해진 영역으로 다시 들어오는 중인지, 계속 벗어나는 중인지를 판단해야 한다
 
-
-        float3 reflectVec = float3(0,0,0);
-
-
-        // 영역을 벗어나는 경우들에 대해서 조사를 한다
-        if(ball.position.x > limitSize.x) reflectVec.x += (ball.velocity.x < 0) ? 0 : 1;
-        if(ball.position.x < -limitSize.x) reflectVec.x += (ball.velocity.x > 0) ? 0 : 1;
-
-        if(ball.position.y > limitSize.y) reflectVec.y += (ball.velocity.y < 0) ? 0 : 1;
-        if(ball.position.y < -limitSize.y) reflectVec.y += (ball.velocity.y > 0) ? 0 : 1;
-
-        if(ball.position.z > limitSize.z) reflectVec.z += (ball.velocity.z < 0) ? 0 : 1;
-        if(ball.position.z < -limitSize.z) reflectVec.z += (ball.velocity.z > 0) ? 0 : 1;
-
+        따라서 공이 영역을 벗어낫지만, 여전히 밖으로 나가고 있는 영역을 파악해서
+        해당 방향을 향하는 노멀 벡터를 만든다
         
+        이후 공의 속도 방향을 노멀 벡터 기준으로 반사 시켜~
+        영역으로 들어오는 방향을 가지게 한다
+        */
 
-        // 반사벡터에 대해서 파악을 한다
-        // 0 이 아닌 경우 = 속도를 바꿔야 하는 경우, 에만 처리를 한다
-        if(length(reflectVec) != 0)
-        {
-            normalize(reflectVec);
-            
-            // 노멀 벡터에 대한 반사를 통해, 속도를 갱신한다
-            ball.velocity = reflect(ball.velocity, reflectVec);
+        //정해진 영역으로 들어오기 위한 반사 노멀벡터
+        float3 reflectNorm = float3(0,0,0);
 
+        //영역을 벗어나는 경우들을 파악해서 반사 노멀벡터 값을 구한다
+        if(ball.position.x > limitSize.x) reflectNorm.x += (ball.velocity.x < 0) ? 0 : 1;
+        if(ball.position.x < -limitSize.x) reflectNorm.x += (ball.velocity.x > 0) ? 0 : 1;
+
+        if(ball.position.y > limitSize.y) reflectNorm.y += (ball.velocity.y < 0) ? 0 : 1;
+        if(ball.position.y < -limitSize.y) reflectNorm.y += (ball.velocity.y > 0) ? 0 : 1;
+
+        if(ball.position.z > limitSize.z) reflectNorm.z += (ball.velocity.z < 0) ? 0 : 1;
+        if(ball.position.z < -limitSize.z) reflectNorm.z += (ball.velocity.z > 0) ? 0 : 1;
+
+        //반사 노멀벡터가 0 벡터가 아닌 경우 = 속도를 바꿔야 하는 경우
+        if(length(reflectNorm) != 0) {
+            //정규화
+            normalize(reflectNorm);
             
+            //노멀 벡터에 대한 반사를 통해, 돌아오는 방향으로 속도를 갱신한다
+            ball.velocity = reflect(ball.velocity, reflectNorm);
+
             // 바뀐 속도에 대해서 모델 좌표계를 다시 만든다
             float3 UP = float3(0,1,0);
-
             ball.zBasis = normalize(ball.velocity);
             ball.xBasis = normalize( cross(UP, ball.zBasis) );
             ball.yBasis = cross(ball.zBasis, ball.xBasis);
@@ -255,79 +225,90 @@ void moveBalls (uint3 id : SV_DISPATCHTHREADID)
 
 
 
-
-
-
-
-
-// vertex 들의 위치 벡터와 노멀 벡터를 모두 갱신해준다
+//Plane 이 공에 붙어 있을 수 있도록, Plane 의 Vertex 를 갱신하는 커널 함수
+//vertex 들의 위치 벡터와 노멀 벡터를 모두 갱신해준다
 [numthreads(GROUP_SIZE, 1, 1)]
 void attachPlane (uint3 id : SV_DISPATCHTHREADID)
 {
-
-    // 담당 스레드가 그리려는 공보다 높은 숫자이면, 계산하지 않는다
+    //담당 스레드가 그리려는 공보다 높은 숫자이면, 계산하지 않는다
     if( id.x > (uint)endIndex ) return;
 
-
-
-    // 일단 현재 담당하는 plane 에 대응되는 공을 가져온다
+    //일단 현재 담당하는 plane 에 대응되는 공을 가져온다
     Ball ball = ballBuffer[id.x];
     
+    //해당 공에 붙는 Plane 에 해당하는 Vertex Index 를 가져온다
+    int index = id.x * 6 * quadNum; //첫번째 인덱스
 
 
-    // 한 공에 할당되는 정점들의 ~ 인덱스를 파악해
-    // 이제 quad 가 여러 개이므로, 전체 정점을 가져와야 한다
-    int index = id.x * 6 * quadNum;
+    /*
+    우선 가장 맨 앞에 있는 quad 의, 가장 앞에 있는 Vertex 처리
 
+    맨 앞에 있는 vertex => Position = 항상 공에 붙어 있도록 한다
+                          Normal = 공의 yBasis 방향과 같은 방향
+    
+    하나의 quad => 2 개의 Triangle 로 구성
+    0,4   1
+     
+    3     2,5    의 순서를 가진다고, 내가 가정
 
-
-    // 맨 앞에 있는 vertex 에 대해서는 항상 공에 붙어 있도록 한다
-    // 노멀벡터는? 앞에 있는 정점은 공의 yBasis 방향과 같은 방향으로 노멀벡터를 가질 것이다
+    따라서 가장 앞에 있는 Vertices 는 0,4 와 1 번째 점들이다
+    */
     // top-left
-	vertexBuffer[index].position = ball.position - ball.xBasis * halfSize;
+	vertexBuffer[index].position = ball.position - ball.xBasis * halfSize; //공의 반지름 만큼 이동
     vertexBuffer[index+4].position = vertexBuffer[index].position;
-
+    
     vertexBuffer[index].normal = ball.yBasis;
     vertexBuffer[index+4].normal = ball.yBasis;
 
-
-
     // top-right
-	vertexBuffer[index+1].position = ball.position + ball.xBasis * halfSize;
+	vertexBuffer[index+1].position = ball.position + ball.xBasis * halfSize; //공의 반지름 만큼 이동
     vertexBuffer[index+1].normal = ball.yBasis;
 
 
+    //이후, 뒤에서 따라가는 Vertices 의 위치와 노멀을 계산해야 하는데 ...    
+    /*
+    먼저, 맨 앞 quad 에서 => 공의 위치와 뒤 Vertices 의 중심을 비교한다
 
-
-    // 맨 앞 quad 에서, 공의 위치와 뒤의 정점의 중심을 비교한다
-    // 둘의 거리 차이가 일정 값, threshold 이하면 plane 을 갱신하지 않는다
-    // threshold 값은 공의 속력 값에 비례한다
-    // 즉 속력이 클수록, threshold 가 커서, plane 이 길어진다
-    // 근데, speed 를 그냥 쓰기에는 speed 가 너무 크지 않나?
-    // plane length 를 조절하는 변수를 하나 추가하자
+    둘의 거리 차이가 일정 값, threshold 값을 넘길 때 나머지 Vertices 의 값을 갱신하도록 한다
+    기본 threshold => planeLength 변수 값으로 받는다
+    
+    threshold 값은 공의 속력 값에 비례하도록 한다
+        그래서 속력이 클수록, threshold 가 커지게 해, 각 quad 가 길어지게 한다
+        속력이 빠를 수록 plane 이 길게 나타나게 된다
+    */
+    //공과 첫번째 quad 뒤 정점의 중심 사이 거리
     float3 backPos = (vertexBuffer[index+3].position + vertexBuffer[index+2].position)/2;
+    //그 거리가 일정 값 이하라면, 다른 Vertices 의 값을 갱신하지 않는다
     if(length(ball.position - backPos) < ball.speed * planeLength) return;
 
 
-
-    // 맨 앞의 quad 에서 앞 뒤 간격이 threshold 보다 커져서, 갱신을 하게되는 경우
-
-    // 뒤에 있는 정점들부터 먼저 앞으로 밀어 넣어주고
-    // 맨 앞 quad에 대해서 마지막에 갱신 => bottom 정점만 처리한다
-    // 노멀 벡터도 그대로 이어 받으면 되겠지?
+    //맨 앞의 quad 에서 앞 뒤 간격이 threshold 보다 커져서, 갱신을 하게되는 경우
+    /*
+    정점들이 앞에 있던 정점을 따라 가야 한다, 앞에 있던 정점이 가지고 있던 값을 가져야 한다
     
-    // 끝에 있는 quad 를 가리키도록 index 를 수정한다
+    뒤에 있는 정점들부터 먼저 앞 정점의 값을 가지게 하고
+
+    맨 앞 quad에 대해서 마지막에 갱신
+        첫번째 quad 의 뒤 2개의 정점이 앞 2개의 정점 값을 가지게 한다
+        결과적으로 보면 첫번째 quad 가 접히는 결과
+    
+    노멀 벡터도 그대로 이어 받으면 되겠지?
+    */
+    //끝에 있는 quad 를 가리키도록 index 를 수정한다
     index += 6 * (quadNum - 1);
-
-    
-    // 끝에 있는 quad 부터 앞으로 반복문을 진행한다
-    for(int j = quadNum; j > 1; j--)
-    {
+        
+    //끝에 있는 quad 부터 첫번째 quad 를 향하도록 반복문을 진행한다
+    for(int j = quadNum; j > 1; j--) {
+        /*
+        -6    -5
+                
+        0,4   1
+     
+        3     2,5
+        */
         // bottom-left
         vertexBuffer[index+3].position = vertexBuffer[index].position;
-
         vertexBuffer[index+3].normal = vertexBuffer[index].normal;
-
 
 
         // bottom-right
@@ -338,7 +319,6 @@ void attachPlane (uint3 id : SV_DISPATCHTHREADID)
         vertexBuffer[index+5].normal = vertexBuffer[index+1].normal;
 
 
-
         // top-left
         vertexBuffer[index].position = vertexBuffer[index-6].position;
         vertexBuffer[index+4].position = vertexBuffer[index-6].position;
@@ -347,31 +327,24 @@ void attachPlane (uint3 id : SV_DISPATCHTHREADID)
         vertexBuffer[index+4].normal = vertexBuffer[index-6].normal;
 
 
-
         // top-right
         vertexBuffer[index+1].position = vertexBuffer[index-5].position;
-
         vertexBuffer[index+1].normal = vertexBuffer[index-5].normal;
 
-
+        //quad 를 하나씩 줄여나간다
         index -= 6;
-
     }
 
 
     // 다시 맨 앞 quad 까지 왔다
     // bottom-left
     vertexBuffer[index+3].position = vertexBuffer[index].position;
-
     vertexBuffer[index+3].normal = vertexBuffer[index].normal;
-
-
 
     // bottom-right
     vertexBuffer[index+2].position = vertexBuffer[index+1].position;
     vertexBuffer[index+5].position = vertexBuffer[index+1].position;
 
     vertexBuffer[index+2].normal = vertexBuffer[index+1].normal;
-    vertexBuffer[index+5].normal = vertexBuffer[index+1].normal;
-    
+    vertexBuffer[index+5].normal = vertexBuffer[index+1].normal;    
 }
