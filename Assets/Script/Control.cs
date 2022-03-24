@@ -6,10 +6,10 @@ using UnityEngine;
 public class Control : MonoBehaviour
 {
     #region Ball 에 대한 정보
-    /*
+        /*
         Ball 하나를 나타내는 구조체
         객체 하나 = 3 + 3 + 1 + 3 + 3 + 3 = 16 * float
-     */
+        */
         public struct Ball
         {
             //position, velocity = 월드 공간 기준
@@ -40,12 +40,17 @@ public class Control : MonoBehaviour
         //Ball 의 속도
         public float initSpeed = 2.0f;
         public float maxSpeed = 5.0f;
+
+        //공의 반지름
+        [Range(0.1f, 3.0f)]
+        public float halfSize = 1.0f;
+
     #endregion
 
     #region Ball 의 꼬리, Plane 관련 = 결국 Vertex 들로 이루어져 있다
-        
-        // Plane 의 한 정점 구조체
-        struct Vertex
+
+    // Plane 의 한 정점 구조체
+    struct Vertex
         {
             public Vector3 position;
             public Vector3 normal;
@@ -151,21 +156,13 @@ public class Control : MonoBehaviour
 
     #endregion
 
-    #region 실행 도중에 바꿀 수 있는 속성들
-        
-        //Plane 의 길이를 결정
-        [Range(0.1f, 3.0f)]
-        public float halfSize = 1.0f;
-
-    #endregion
-
     #region 경계를 그리는 선
         
         public Material lineMaterial;
 
         ComputeBuffer lineBuffer;
-        Vector3[] lineVertex = new Vector3[24];
 
+        Vector3[] lineVertex = new Vector3[24];
         Vector3[] indexArray = new Vector3[8];
 
     #endregion
@@ -181,43 +178,37 @@ public class Control : MonoBehaviour
         */
         InitComputeShader();
 
-        // ball array 를 만들고, ball data 를 초기화 한다
+        //ball 정보가 담긴 array 를 만들고, ball data 를 초기화 한다
         InitBall();
 
-
-        // vertex array 를 만들고, vertex data 를 초기화 한다
+        //Plane 의 vertex 정보가 담긴 array 를 만들고, vertex data 를 초기화 한다
         InitVertex();
 
-
-        // ball compute buffer 를 연결한다
+        //ball 정보를 넘기는 compute buffer 를 만들고 GPU 에 연결한다
         InitBallComputeBuffer();
 
-
-        // vertex compute buffer 를 연결한다
+        //Plane 의 vertex 정보를 넘기는 compute buffer 를 만들고 GPU 에 연결한다
         InitVertexComputeBuffer();
 
 
-        // 마지막으로 argument buffer 를 만들고
+        //마지막으로 GPU Instancing 에 필요한 argument buffer 를 만들고
         InitArgBuffer();
 
-        // Draw Indirect 에 필요한 나머지 매개변수 설정
+        //Draw Indirect 에 필요한 나머지 매개변수 설정
+        //자세하게는 모르겠다...
         bounds = new Bounds(Vector3.zero, Vector3.one * 1000);
         props = new MaterialPropertyBlock();
         props.SetFloat("_UniqueID", Random.value);
 
+        //연산에 필요한 속성 값들을 GPU 로 넘긴다
+        setPropertiesOnce();    //한번만 설정, 이후 변경 없음
+        setProperties();        //변경가능
 
-
-        // 필요한 속성 값들을 GPU 로 넘긴다
-        setPropertiesOnce();
-        setProperties();
-
-
-
+        //공이 움직일 수 있는 범위를 line 으로 그려서 표현
         Drawlines();
     }
 
 
-    
     // 1
     void InitComputeShader()
     {
@@ -254,196 +245,138 @@ public class Control : MonoBehaviour
          */
         vertexBufferSize = ballBufferSize * 6 * quadNum;
     }
-    
-    
-    
-
 
     // 2
     void InitBall()
     {
-
-        // 먼저 공들에 대한 정보를 담는 배열을 만든다.
+        //먼저 공들에 대한 정보를 담는 배열을 만든다.
+        //배열의 크기는 앞서 구한, 최대 개수의 공을 받는 경우를 고려해 최대 개수 크기로 할당한다
         ballArray = new Ball[ballBufferSize];
 
         /* 
             배열 각각에 Ball 객체 정보를 일단 할당해 놓는다.
-            데이터 용량 낭비인가? 싶긴한데 ...
+            사용하지 않는 Ball 들까지 미리 객체를 만드는 것이라, 데이터 용량 낭비인가? 싶긴한데 ...
             어쨌든 최대개수를 지원해야 하니까, 미리 할당한다고 생각하자.
         */
         for(int i = 0; i < ballBufferSize; i++)
             ballArray[i] = new Ball();
 
-
-
-        // 첫 번째 공에 대해서만 초기화를 해준다
-        // 속도 초기화
+        //첫 번째 공에 대해서만 초기화를 해준다, 처음에는 무조건 공 하나만 나타나기 때문에
+        //속도 초기화, 랜덤한 값을 가진다
+        //월드 공간 좌표계 기준으로 속도를 표현한다
         ballArray[0].velocity = new Vector3(Random.value, Random.value, Random.value).normalized;
         ballArray[0].speed = (Random.value + 1) * initSpeed;
 
-
-        
-        Vector3 UP = new Vector3(0,1,0);
-        // 속도에 맞춰서 좌표계 초기화
-        ballArray[0].zBasis = ballArray[0].velocity.normalized;
-        ballArray[0].xBasis = Vector3.Cross(UP, ballArray[0].zBasis);
-        ballArray[0].yBasis = Vector3.Cross(ballArray[0].zBasis, ballArray[0].xBasis);
-        
+        //공의 속도에 맞춰서 공의 모델 좌표계 초기화
+        //공의 모델 좌표계는 월드 공간 좌표계 중심으로 표현한다
+        //카메라 좌표계를 구하는 방식을 따라했다
+        Vector3 UP = new Vector3(0,1,0); //월드 공간 y축        
+        ballArray[0].zBasis = ballArray[0].velocity.normalized;                         //z축 => 공이 나아가는 방향
+        ballArray[0].xBasis = Vector3.Cross(UP, ballArray[0].zBasis);                   //x = UP cross z
+        ballArray[0].yBasis = Vector3.Cross(ballArray[0].zBasis, ballArray[0].xBasis);  //y = z cross x
     }
-
-
-
 
     // 3
     void InitVertex()
     {
-
-        // 사용할 vertex data 를 초기화 한다
+        //사용할 vertex data 를 최대 개수로 생성한다
+        //Ball 과 달리 초기화 할 데이터가 따로 없다
         vertexArray = new Vertex[vertexBufferSize];
-
     }
-
-
-
 
     // 4
     void InitBallComputeBuffer()
     {
-
         /* 
-            CPU 의 balls array 를 GPU 로 넘길 수 있는 Compute Buffer 를 생성한다.
-            Compute Buffer 에 balls array 값을 저장한다.
-        */
+            CPU 의 balls array 를 GPU 로 넘길 수 있는 Compute Buffer 를 생성한다
+            Compute Buffer 에 balls array 값을 저장한다
+        */                                           //Ball Struct 하나의 사이즈 = float * 16
         ballBuffer = new ComputeBuffer(ballBufferSize, 16 * sizeof(float));
-        ballBuffer.SetData(ballArray);
+        ballBuffer.SetData(ballArray); //Ball Array 의 정보를 버퍼로 전달한다
 
-
-
-        // ball buffer 를 ball 계산 커널 함수에 연결
+        //ball buffer 를 Compute Shader 에서 Ball 을 계산하는 커널 함수에 연결
         computeShader.SetBuffer(ballKernelHandleMove, "ballBuffer", ballBuffer);
         computeShader.SetBuffer(ballKernelHandleAssign, "ballBuffer", ballBuffer);
 
-
-
-        // ball 의 정보는 plane 계산 커널 함수에도 연결되어야 한다
+        //ball 의 정보는 plane 계산 커널 함수에도 연결되어야 한다 => Plane 이 Ball 을 따라다녀야 하기 때문에
         computeShader.SetBuffer(planeKernelHandleAttach, "ballBuffer", ballBuffer);
-                
 
-
-        // Compute Buffer 를 ball material 에 연결 => 렌더링에 사용한다
+        //Ball Compute Buffer 를 ball material 에도 연결 => Ball 렌더링에도 사용한다
         ballMaterial.SetBuffer("ballBuffer", ballBuffer);
-
     }
-
-
-
 
     // 5
     void InitVertexComputeBuffer()
     {
-        
+                                                        //Vertex 1 개 = float * 6
         vertexBuffer = new ComputeBuffer(vertexBufferSize, 6 * sizeof(float));
         vertexBuffer.SetData(vertexArray);
 
-
-        // vertex buffer 를 공 정보 업데이트 할 때 사용
+        //vertex buffer 를 공 정보 업데이트 할 때 사용
         computeShader.SetBuffer(ballKernelHandleAssign, "vertexBuffer", vertexBuffer);
-        
-        
+
         // vertex buffer 는 plane 커널 함수에서 사용
         computeShader.SetBuffer(planeKernelHandleAttach, "vertexBuffer", vertexBuffer);
 
-
-
         // plane 을 그리는 material 에 연결
         planeMaterial.SetBuffer("vertexBuffer", vertexBuffer);
-
     }
-
-
-
 
     // 6
     void InitArgBuffer()
     {
-        // Draw Indirect 명령어를 사용하는 데 쓰이는 argument 를 넘기는 compute buffer ~ 라는 것을 알린다.
+        //GPU Instancing, Draw Indirect 명령어를 사용하는 데 쓰이는
+        //argument 를 넘기는 compute buffer 를 만들고
+        //Draw Inderect 에 쓰일 것 이라는 걸 알린다.
         argsBuffer = new ComputeBuffer(1, 5 * sizeof(uint), ComputeBufferType.IndirectArguments);
-
-
-        if (ballMesh != null)
+        
+        //argument array 에서 값을 먼저 채우고
+        if (ballMesh != null) //Ball 을 그릴 것이기 때문에, Ball Mesh 가 있을 때만 유효하다
         {
-            args[0] = (uint)ballMesh.GetIndexCount(0);
-            args[1] = (uint)endIndex;
-
+            args[0] = (uint)ballMesh.GetIndexCount(0); //Instance 당 필요한 index count
+            args[1] = (uint)endIndex;   //그리고자 하는 Instance 개수, 처음에는 1개
+            //모르겠으..
             //args[2] = (uint)ballMesh.GetIndexStart(0);
             //args[3] = (uint)ballMesh.GetBaseVertex(0);
         }
 
-
         // argument 버퍼에 값을 넣는다
         argsBuffer.SetData(args);
-
     }
-
-
-
 
     // 7
     void setPropertiesOnce() // 한 번만 들어가는 변수 값들 
     {
-        
         // In Compute Shader
-        computeShader.SetVector("limitSize", limitSize); // 공의 제한 범위
-        computeShader.SetFloat("quadNum", quadNum); // plane 에서 사용할 quad 개수
+        computeShader.SetVector("limitSize", limitSize);   //공의 제한 범위
+        computeShader.SetFloat("quadNum", quadNum);        //하나의 plane 을 구성하는 quad 개수
 
-        // 처음, 공을 늘리려는 범위를 지정해준다
+        //처음, 공을 늘리려는 범위를 지정해준다
         computeShader.SetInt("startIndex", startIndex);
         computeShader.SetInt("endIndex", endIndex);
                
-
-
         // In Ball Material
         ballMaterial.SetVector("limitSize", limitSize); // 공의 제한 범위
 
-
-
         // In Plane Material
-        // material 에 한 plane 에 들어가는 quad 개수 넘김
-        planeMaterial.SetFloat("quadNum", quadNum);
-        
+        planeMaterial.SetFloat("quadNum", quadNum); //한 plane 에 들어가는 quad 개수 넘김
     }
-
-
-
-
-    
+       
     // 8
     void setProperties() // 값을 조절하고자 하는 변수 값들만 여기에 넣는다
     {
-        
         // 먼저 compute shader 에 들어가는 변수 세팅
         computeShader.SetFloat("halfSize", halfSize);
         computeShader.SetFloat("maxSpeed", maxSpeed);
         computeShader.SetFloat("planeLength", planeLength);
 
-
         // To Ball Material
         ballMaterial.SetFloat("radius", halfSize);
-
     }
 
 
     
-
-
-
-
-
-
-
-
-
-    // Update is called once per frame
+    //Update is called once per frame
     void Update()
     {
         /*
@@ -639,6 +572,7 @@ public class Control : MonoBehaviour
 
 
 
+    // 9.
     void Drawlines()
     {
         lineBuffer = new ComputeBuffer(24, 3 * sizeof(float));
