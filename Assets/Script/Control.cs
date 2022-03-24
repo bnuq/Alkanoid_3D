@@ -3,195 +3,136 @@ using System.Collections.Generic;
 using UnityEngine;
 
 
-// gittest 4
-// test 5
 public class Control : MonoBehaviour
 {
-
     #region Ball 에 대한 정보
-    
-        public struct Ball // ball 하나의 구조체
+    /*
+        Ball 하나를 나타내는 구조체
+        객체 하나 = 3 + 3 + 1 + 3 + 3 + 3 = 16 * float
+     */
+        public struct Ball
         {
-
-            // 여기서 position, velocity = 월드 공간 기준이잖아
-            // 3 + 3 + 1 + 3 + 3 + 3 = 16 개
+            //position, velocity = 월드 공간 기준
             public Vector3 position;
             public Vector3 velocity;
             public float speed;
             
-
-
-            // 회전 후 모델 좌표계
+            // 회전 후 모델의 기본 좌표계
+            //역시
             public Vector3 xBasis;
             public Vector3 yBasis;
             public Vector3 zBasis;
-
         }
 
-
-        // ball 의 mesh 정보
+        //ball 의 mesh 정보, 모델
         public Mesh ballMesh;
 
-
-        // ball 을 그리는 데 쓰이는 material
+        //ball 을 그리는 데 쓰이는 material
         public Material ballMaterial;
-
 
         // 그리고자 하는 ball 의 최대개수    
         public int ballsCountMax;
 
-
-
-
-
-        // Ball 이 움직일 수 있는 범위 => 이거는 실행도중 바꾸지 말자
-        // inspector 창에서 수정은 할 수 있지만, 실행도중에는 바뀌지 않는다
+        //Ball 이 움직일 수 있는 범위 => 이거는 실행도중 바꾸지 말자
+        //inspector 창에서 수정은 할 수 있지만, 실행도중에는 바뀌지 않는다
         public Vector3 limitSize = new Vector3(10,10,10);
 
-
+        //Ball 의 속도
         public float initSpeed = 2.0f;
         public float maxSpeed = 5.0f;
-
-
-/*         [Range(0.1f, 3.0f)]
-        public float radius = 1.0f; */
-        
-
     #endregion
 
-    
-
-
-
-    #region Plane 관련 = 결국 Vertex 들로 이루어져 있다
-
-        struct Vertex // Plane 의 한 정점 구조체
+    #region Ball 의 꼬리, Plane 관련 = 결국 Vertex 들로 이루어져 있다
+        
+        // Plane 의 한 정점 구조체
+        struct Vertex
         {
             public Vector3 position;
             public Vector3 normal;
         }
 
-        
-
         // Plane 을 그리는 데 쓰이는 material
         public Material planeMaterial;
 
-
-
-        [Range(0.01f, 0.1f)]
+        [Range(0.01f, 0.1f)] //Plane 의 길이
         public float planeLength = 0.02f;
 
     #endregion
 
+    #region Comute Shader Information
+        
+        //할당받는 Compute Shader
+        public ComputeShader computeShader;
 
+        //Dispatch 에 필요한 그룹의 수
+        //Compute Shader 에서 사용하고자 하는 그룹 수
+        private int groupSizeX;
 
+        // delta time 을 쪼갤 반복 수 => 역시 실행 도중에는 바꾸지 않는다
+        public int iteration = 5;
 
-    public ComputeShader computeShader;
-
-    // Dispatch 에 필요한 그룹의 수
-    private int groupSizeX;
-
-
-    // delta time 을 쪼갤 반복 수 => 역시 실행 도중에는 바꾸지 않는다
-    public int iteration = 5;
-
-
-
+    #endregion
 
     #region ball - compute shader
-        
-        // ball 에 대한 연산을 하는 커널
-        int ballKernelHandleMove;
 
+        //Kernel Id 저장
+        int ballKernelHandleMove;   //ball 에 대한 연산을 하는 커널 id
         int ballKernelHandleAssign;
 
-
-
-        // 사용하고자 하는 커널 함수 이름
-        
-        // 공을 이동시키는 커널 함수
-        string ballKernelMove = "moveBalls";
-
-
-
-        // 공에 정보를 할당하는 커널 함수
-        string ballKernelAssign = "assignBalls";
-
+        //Compute Shader 에서 사용하고자 하는 커널 함수 이름
+        string ballKernelMove = "moveBalls";     // 공을 이동시키는 커널 함수
+        string ballKernelAssign = "assignBalls"; // 공에 정보를 할당하는 커널 함수
 
         // ball buffer 에서 공을 늘리고자 하는 범위를 가리키는 인덱스
         public int startIndex = 0;
-
         public int endIndex = 1;
 
     #endregion
 
-
-
     #region plane - compute shader
 
-        // plane 에 대한 연산을 하는 커널
-        // 커널 하나만 사용한다
-        int planeKernelHandleAttach;
+        //사용하는 kerenl Id
+        int planeKernelHandleAttach;    // plane 에 대한 연산을 하는 커널 id
 
-
-
-        // 사용하는 커널 이름
-        string planeKernelNameAttach = "attachPlane";
-
-
+        //사용하는 커널 함수 이름
+        string planeKernelNameAttach = "attachPlane"; //커널 함수 하나만 사용
         
-        // plane 을 이루는 quad 개수 => 처음에만 설정, 나중에는 바뀌지 않는다
+        //하나의 plane 을 이루는 quad 개수 => 처음에만 설정, 나중에는 바뀌지 않는다
         public int quadNum = 10;
 
     #endregion
 
-
-
-
     #region ball - array, compute buffer
 
-        // ball 들의 정보를 모아둔 배열
+        //ball 들의 정보를 모아둔 배열, 버퍼
         Ball[] ballArray;
 
-
-
-        // ball array 를 GPU 에 넘기는 버퍼
+        //ballArray 를 GPU 에 넘기는 버퍼
         ComputeBuffer ballBuffer;
-
-
 
         // ball buffer 에 할당되는 실제 길이
         int ballBufferSize;
 
     #endregion
 
-
-
-
     #region plane - array, compute buffer
         
-        // plane 을 이루는 정점들을 모아둔 배열
+        //plane 을 이루는 정점들을 모아둔 배열
         Vertex[] vertexArray;
 
-
-
-        // vertex array 를 넘기는 버퍼
+        //vertexArray 를 GPU에 넘기는 버퍼
         ComputeBuffer vertexBuffer;
-
-
 
         // vertex buffer 실제 길이
         int vertexBufferSize;
-        
+
     #endregion
 
-
-
-
-
     #region Draw Mesh Instance Indirect 관련
-
         /*  
+            Draws the same mesh multiple times using GPU instancing.
+            같은 도형을 여러 개, 빠르게 그려내는 GPU Instancing 을 사용하기 위해 필요한 arguments
+
             draw indirect 에 필요한 argument 배열
             1. index count per instance
             2. instance count
@@ -200,40 +141,26 @@ public class Control : MonoBehaviour
             5. start instance location.
         */
         uint[] args = new uint[5] { 0,0,0,0,0 };
-        // argument 배열을 넘겨주는 버퍼
+        
+        //args 배열을 GPU에 넘겨주는 버퍼
         ComputeBuffer argsBuffer;
-
-
+        
+        //필요하다고 해서 넣었는데... 자세히는 모르겠다
         Bounds bounds;
-
-
         MaterialPropertyBlock props;
 
     #endregion
 
-
-
-
-
     #region 실행 도중에 바꿀 수 있는 속성들
         
-        // To compute shader
-
-        /* [Range(0.1f, 5.0f)]
-        public float threshold = 0.5f; */
-
+        //Plane 의 길이를 결정
         [Range(0.1f, 3.0f)]
         public float halfSize = 1.0f;
 
-
     #endregion
 
-
-
-
-
-
     #region 경계를 그리는 선
+        
         public Material lineMaterial;
 
         ComputeBuffer lineBuffer;
@@ -242,21 +169,17 @@ public class Control : MonoBehaviour
         Vector3[] indexArray = new Vector3[8];
 
     #endregion
+   
 
 
-
-
-
-
-    
-
-    // Start is called before the first frame update
+    //Start is called before the first frame update
     void Start()
     {
-        // array 를 만들기 전에, 버퍼의 길이, 배열의 길이를 알아야 하므로
-        // compute shader 관련 초기화를 먼저 진행해야 한다
+        /*
+        Compute Shader 에서 필요한 커널 함수를 할당하며
+        GPU 에 정보를 넘길 때 필요한 버퍼의 최대 크기를 계산한다
+        */
         InitComputeShader();
-
 
         // ball array 를 만들고, ball data 를 초기화 한다
         InitBall();
@@ -298,43 +221,38 @@ public class Control : MonoBehaviour
     // 1
     void InitComputeShader()
     {
-
-        // 셰이더에서 ball 계산을 담당하는 커널 함수를 가져온다
+        //Compute Shader에서 ball 계산에 필요한 커널 함수 id 를 가져온다
         ballKernelHandleMove = computeShader.FindKernel(ballKernelMove);
-
         ballKernelHandleAssign = computeShader.FindKernel(ballKernelAssign);
 
-
-
-        // 셰이더에서 plane 계산을 담당하는 커널 함수를 가져온다
+        //plane 계산에 필요한 커널 함수 id
         planeKernelHandleAttach = computeShader.FindKernel(planeKernelNameAttach);
 
-
-
-
-        // ball 을 계산하는 커널의, 한 스레드 그룹을 이루는 스레드 개수를 구한다.
-        // 모든 커널 함수들은 한 스레드 그룹으 크기가 모두 동일하다
+        /*
+        Compute Shader 에서 하나의 커널 함수가 사용하는 스레드 개수를 가져온다
+        나는 모든 커널 함수가 같은 스레드 개수를 사용하도록 설정했으며, 모두 x축 방향 스레드만 사용한다
+        
+        따라서, 임의의 하나의 커널 함수에 대해서 스레드 개수를 가져오며,
+        x 축 방향 개수만 가져온다
+         */
         uint x;
         computeShader.GetKernelThreadGroupSizes(ballKernelHandleMove, out x, out _, out _);
         
-
-
-
-        // 한 그룹을 이루는 스레드의 개수를 이용해서, ball 최대 개수를 표현하려면 그룹이 최소 몇개가 필요한지 구한다.
+        //이번 실행에서 최대로 가질 수 있는 공의 개수를 이용해서, 최대로 필요한 그룹의 개수를 구한다
+        //최대 개수의 Ball 을 표현하기 위해서, 필요한 최대 그룹의 수는 무엇인가?
         groupSizeX = Mathf.CeilToInt((float)ballsCountMax / (float)x);
 
-
-
-        // ball 의 버퍼 크기를 구한다. 표현하려는 ball 최대 개수를 모두 포함할 수 있어야 한다
+        //Ball 의 정보를 GPU로 넘길 버퍼 크기를 구한다. 표현하려는 ball 최대 개수를 모두 포함할 수 있어야 한다
         ballBufferSize = groupSizeX * (int) x;
 
-
-
-        // plane vertex 의 버퍼 크기를 구한다.
-        // quad 하나에 vertex 가 6개가 필요하며, quadNum 개의 quad 가 존재한다
-        // 따라서 ball 하나에, vertex 6 개 * 총 사용할 quad 갯수 만큼 공간을 확보한다
+        /*
+        하나의 plane 을 이루는 vertex 의 정보를 GPU 에 넘길 버퍼 크기를 구한다.
+        quad 하나 당 vertex 가 6개가 필요하며, 하나의 plane 에는 quadNum 개의 quad 가 존재한다
+        Ball 하나 당 하나의 Plane 이 할당되므로, 하나의 Ball 당 6 * quadNum 개의 Vertex 가 할당된다
+        최대 ballBufferSize 개 의 Ball 정보를 저장하므로,
+        ballBufferSize * 6 * quadNum 만큼의 버퍼 크기가 있어야, 최대 Plane Vertex 정보를 저장할 수 있다
+         */
         vertexBufferSize = ballBufferSize * 6 * quadNum;
-        
     }
     
     
@@ -689,11 +607,6 @@ public class Control : MonoBehaviour
         argsBuffer.SetData(args);
 
     }
-
-
-
-
-
 
 
     void decreaseDrawNumber() // click number 가 감소했을 때 처리
