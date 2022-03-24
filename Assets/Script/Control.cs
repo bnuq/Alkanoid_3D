@@ -295,6 +295,7 @@ public class Control : MonoBehaviour
         ballBuffer.SetData(ballArray); //Ball Array 의 정보를 버퍼로 전달한다
 
         //ball buffer 를 Compute Shader 에서 Ball 을 계산하는 커널 함수에 연결
+        //해당 커널 함수에서 버퍼에 접근할 수 있도록 한다
         computeShader.SetBuffer(ballKernelHandleMove, "ballBuffer", ballBuffer);
         computeShader.SetBuffer(ballKernelHandleAssign, "ballBuffer", ballBuffer);
 
@@ -386,61 +387,55 @@ public class Control : MonoBehaviour
             그러니 delta time 을 5 개로 쪼개서, 각 5번에 대해 compute shader 에서 계산을 진행하게 하고
             이후에 렌더링 하도록 명령한다.
         */
-        // 먼저 쪼갠 시간을 compute shader 에 넘겨준다.
+        //먼저 iteration 으로 쪼갠 시간을 compute shader 에 넘겨준다
         computeShader.SetFloat("deltaTime", Time.deltaTime/iteration);
 
-
-
-        // itertaion 만큼 반복해서 compute shader 내에서 계산한다.
+        // itertaion 만큼 반복해서 compute shader 내에서 iteration 번 계산하도록 한다
         for(int i = 0; i < iteration; i++)
         {
-            // Compute Shader -> ball 커널 함수를 실행시켜, 그 결과를 버퍼에 저장
-            // ball 들의 위치, 속도 등의 정보를 계산, 저장한다.
+            //Compute Shader -> ball 커널 함수를 실행시켜, 그 결과를 버퍼에 저장
+            //ball 들의 위치, 속도 등의 정보를 계산, 저장한다.
             computeShader.Dispatch(ballKernelHandleMove, groupSizeX, 1, 1);
 
-
-            // 움직인 공에 대한 plane 을 계산한다
+            //움직인 공에 대한 plane 을 계산한다
             computeShader.Dispatch(planeKernelHandleAttach, groupSizeX, 1, 1);
-        }
-      
+        }    
 
-
-        // Shader 를 이용하여, GPU Instancing 을 통해 바로 렌더링을 진행한다.
+        //Shader 를 이용하여, GPU Instancing 을 통해 바로 렌더링을 진행한다.
         // ball material 사용 => ball 을 그린다
         Graphics.DrawMeshInstancedIndirect(ballMesh, 0, ballMaterial, bounds, argsBuffer, 0, props);
-
+        
+        /*
+        Plane 은 Procedual Mesh
+        예제를 봤었을 때, 따로 그렸었다
+        그걸 이용
+        */
     }
 
 
 
-
-
-    // 카메라가 씬을 렌더링 한 후에 호출
-    // 사용자가 자신의 오브젝트를 렌더링 하는 경우에 사용
-    // ball 이 그려진 후에, plane 을 그리도록 한다
+    /*
+    카메라가 씬을 렌더링 한 후에 자동으로 호출되는 함수
+    사용자가 자신의 오브젝트를 렌더링 하는 경우에 사용, 나의 경우 Procedural Mesh 를 그리기 위해 사용
+    ball 이 그려진 후에, plane 을 그리도록 한다
+    */
     void OnRenderObject()
     {
-        
         // plane 을 그리는 material 을 이용 
         planeMaterial.SetPass(0);
         
-        // 이번에는 primitive 가 삼각형이라고 넘겨주네 => 버퍼에서 알아서 3개씩 끊어서 읽고
-        
-        // 1개의 mesh instace = quad 를 그리니까 총 6개의 정점마다 끊어주고
-        // 이제 여러개의 quad 를 그릴꺼니까, 6 * quadNum 개의 정점마다 끊어주어야 한다
-
-        // 총 그리는 procedural geometry 의 개수
+        //이번에는 primitive 가 삼각형이라고 넘겨주네 => 버퍼에서 알아서 3개씩 끊어서 읽고
+        //1개의 mesh instance = quad 를 그리니까 총 6개의 정점마다 끊어주고
+        //하나의 Plane 에는 quadNum 개의 quad 가 존재하므로, 6 * quadNum 개의 정점마다 끊어주어야 한다
+        //endIndex = 총 그리는 procedural geometry 의 개수
         Graphics.DrawProceduralNow(MeshTopology.Triangles, 6 * quadNum, endIndex);
 
-
-
+        
+        //????
         lineMaterial.SetPass(0);
-
         Graphics.DrawProceduralNow(MeshTopology.Lines, 2, 12);
-
     }
  
-
 
 
     // 스크립트나 인스펙터를 통해, 매개변수 값이 바뀌는 경우
@@ -451,22 +446,17 @@ public class Control : MonoBehaviour
 
 
 
-
-
-
-    void OnDestroy()
+    void OnDestroy()    //Compute Buffer 제거해준다
     {
         if (ballBuffer != null)
         {
             ballBuffer.Dispose();
         }
 
-
         if (vertexBuffer != null)
         {
             vertexBuffer.Dispose();
         }
-
 
         if (argsBuffer != null)
         {
@@ -481,8 +471,6 @@ public class Control : MonoBehaviour
 
 
 
-
-
     // 버튼은 다루는 메서드
     public void upClickNum()
     {
@@ -490,87 +478,59 @@ public class Control : MonoBehaviour
         else increaseDrawNumber();
 
     }
-
-
     public void downClickNum()
     {
         decreaseDrawNumber();
     }
 
-
-
-
-
     void increaseDrawNumber() // click number 가 증가했을 때, 그릴 공의 정보를 늘리는 것
     {
+        /*
+        한번 클릭할 때마다, 1 개의 공마다 2개의 공이 새로 생성된다
+        Binary Tree 구조하고 비슷, 부모 공 하나마다 2개의 자식 공이 생성
 
-        // 공의 개수를 늘리기 전에, 생각을 하는거지 => 공의 개수를 늘렸을 때, 범위를 미리 계산한다
-        
+        [startIndex, endIndex) = 새로 생성되는 공의 인덱스
+        */
+        //새로 생성되는 공의 인덱스 계산
         startIndex = endIndex;
         endIndex *= 3;
 
-
-
-        // 2 가지 다 고려를 해야 한다
-        // 먼저 endIndex 가 버퍼 사이즈 자체를 넘어가는 경우
+        //공의 개수가 버퍼 사이즈를 넘어가는 경우, 2 가지 다 고려를 해야 한다
+        //먼저 endIndex 가 버퍼 사이즈 자체를 넘어가는 경우
         endIndex = (endIndex >= ballBufferSize) ? ballBufferSize : endIndex;
 
-
-        // tmpEndIndex 가 주어진 최대 버퍼 크기를 넘어설 수 있다 => 이 경우, 최대 버퍼 크기 값을 가지도록 한다
-        // ballBuffer 는 ballBufferSize - 1 까지만 인덱스를 가질 수 있겠지??
+        //필요 없는 듯..?
         endIndex = (endIndex >= ballsCountMax) ? ballsCountMax : endIndex;
 
-
-
-        // 새로운 정보를 구하고자 하는 공의 범위를 구했으니, compute shader 에 값을 갱신한다
+        //새로운 정보를 구하고자 하는 공의 범위를 구했으니, compute shader 에 값을 갱신한다
         computeShader.SetInt("startIndex", startIndex);
         computeShader.SetInt("endIndex", endIndex);
 
-        
-
-        // 현재 그려져 있던 공들에 대해서, 공의 갯수를 증가시키는 것
-        // 지정된 범위 내에 있는 공들에 대해서, 정보를 앞에 있던 공에서 구한다
+        //세로 추가된 Ball 들의 정보를 구하는 커널 함수 실행
         computeShader.Dispatch(ballKernelHandleAssign, groupSizeX, 1, 1);
 
-
-
-
         // 새로 구한 draw number 를 argument 배열에 넣어주고, arg 도 갱신해준다
-        args[1] = (uint)endIndex;
+        args[1] = (uint)endIndex;   // GPU Instancing 을 통해 그릴 Instance 개수 갱신
         argsBuffer.SetData(args);
-
     }
-
 
     void decreaseDrawNumber() // click number 가 감소했을 때 처리
     {
-
-        // 이번에는 반대로 줄이고자 하는 범위를 구한다
-        // 최소 0~1 범위까지만 내려가야 한다
+        //이번에는 반대로 줄이고자 하는 범위를 구한다
+        //최소 0~1 범위까지만 내려가야 한다
         startIndex /= 3;
         endIndex = (endIndex / 3 == 0) ? 1 : endIndex / 3;
-
-
 
         // 줄어든 범위를 compute shader 에 갱신한다
         computeShader.SetInt("startIndex", startIndex);
         computeShader.SetInt("endIndex", endIndex);
 
-        
-
-        // 공의 개수가 줄어드는 경우에는, 호출할 커널 함수가 없다.                
-        
-
-
-        // 새로 구한 draw number 를 argument 배열에 넣어주고, arg 도 갱신해준다
+        //공의 개수가 줄어드는 경우에는, 호출할 커널 함수가 없다.      
+        //그냥 그리는 Instance 개수를 줄이면 된다
+        //새로 구한 draw number 를 argument 배열에 넣어주고, arg 도 갱신해준다
         args[1] = (uint)endIndex;
         argsBuffer.SetData(args);
-
-
     }
-
-
-
 
     // 9.
     void Drawlines()
@@ -626,6 +586,4 @@ public class Control : MonoBehaviour
         
 
     }
-
-
 }
