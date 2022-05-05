@@ -18,7 +18,6 @@ public class Control : MonoBehaviour
             public float speed;
             
             // 회전 후 모델의 기본 좌표계
-            //역시
             public Vector3 xBasis;
             public Vector3 yBasis;
             public Vector3 zBasis;
@@ -49,8 +48,8 @@ public class Control : MonoBehaviour
 
     #region Ball 의 꼬리, Plane 관련 = 결국 Vertex 들로 이루어져 있다
 
-    // Plane 의 한 정점 구조체
-    struct Vertex
+        // Plane 의 한 정점 구조체
+        struct Vertex
         {
             public Vector3 position;
             public Vector3 normal;
@@ -64,7 +63,7 @@ public class Control : MonoBehaviour
 
     #endregion
 
-    #region Comute Shader Information
+    #region Compute Shader Information
         
         //할당받는 Compute Shader
         public ComputeShader computeShader;

@@ -23,7 +23,7 @@ float quadNum;    //하나의 Plane 이 가지는 quad 개수
 float deltaTime;
 
 
-//실행 도중, 언제든 지 값이 바뀔 수 있는 arguments
+//실행 도중, 언제든 지 값이 바뀔 수 있는 argumentsd
 float halfSize;     //Ball 의 반지름
 float maxSpeed;     //최대 속도
 float planeLength;  //Plane 의 길이
@@ -80,7 +80,8 @@ float random (uint id, float seed) {
 
 //[startIndex, endIndex) 범위 인덱스 Ball 에 데이터를 할당하는 커널 함수
 [numthreads(GROUP_SIZE, 1, 1)]
-void assignBalls (uint3 id : SV_DISPATCHTHREADID) //SV_DISPATCHTHREADID => 전체 그룹 내에서 해당 스레드의 id
+//SV_DISPATCHTHREADID => 전체 그룹 내에서 해당 스레드의 id
+void assignBalls (uint3 id : SV_DISPATCHTHREADID)
 {
     /*
     스레드 하나 = 버퍼의 Ball 하나 담당
@@ -107,13 +108,14 @@ void assignBalls (uint3 id : SV_DISPATCHTHREADID) //SV_DISPATCHTHREADID => 전�
     //부모 공의 속도 값을 기본적으로 가진다
     //앞서 구한 랜덤 값을 이용해서 자식 공의 방향을 조금 수정한다
     ballBuffer[id.x].velocity = ballBuffer[ (id.x-startIndex) / 2 ].velocity
-                                //부모 공의 모델 좌표계 값을 이용해서, 자식 공의 새로운 방향을 설정
-                                //x축 방향 = 나아가는 방향 기준 좌,우 를 의미 => flag 값을 이용해서 좌, 우 를 설정한다
-                                + flag * ballBuffer[ (id.x-startIndex) / 2 ].xBasis * rndVal
-                                        //랜덤 값이 [0,1] 범위 값이기에 y,z 축 방향으로 [-1, 1] 범위의 랜덤한 값을 곱해
-                                        //조금 다른 방향을 가지게 한다
-                                        + ballBuffer[ (id.x-startIndex) / 2 ].yBasis * (rndVal * 2 - 1)
-                                        + ballBuffer[ (id.x-startIndex) / 2 ].zBasis * (rndVal * 2 - 1);
+                    //부모 공의 모델 좌표계 값을 이용해서, 자식 공의 새로운 방향을 설정
+                    //x축 방향 = 나아가는 방향 기준 좌,우 를 의미 => flag 값을 이용해서 좌, 우 를 설정한다
+                    + flag * ballBuffer[ (id.x-startIndex) / 2 ].xBasis * rndVal
+                            //랜덤 값이 [0,1] 범위 값이기에 y,z 축 방향으로 [-1, 1] 범위의 랜덤한 값을 곱해
+                            //조금 다른 방향을 가지게 한다
+                            + ballBuffer[ (id.x-startIndex) / 2 ].yBasis * (rndVal * 2 - 1)
+                            + ballBuffer[ (id.x-startIndex) / 2 ].zBasis * (rndVal * 2 - 1);
+
     //방향이 0 이 되는 상황은 피한다    
     if( length(ballBuffer[id.x].velocity) == 0 ) ballBuffer[id.x].velocity = float3(1,1,1);
 

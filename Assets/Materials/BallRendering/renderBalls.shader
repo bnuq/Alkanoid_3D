@@ -116,10 +116,8 @@ Shader "myProject/renderBalls" {
                     
                     /*
                     변환 후 좌표계의 벡터를 알고 있으니, 변환행렬을 구할 수 있다
-                    이 행렬 자체가 월드 변환 행렬
-                    현재 모델의 기본 좌표계 => 받은 좌표계 값이 됐다고 생각할 수 있다
+                    이 행렬 자체가 모델 -> 월드 변환 행렬
                     회전 + 이동 변환
-                    기본 모델 공간 좌표계와 월드 공간 좌표계가 일치하기 때문에, 바로 적용할 수 있었다고 생각한다
                     */
                     float4x4 motionMat = float4x4 (
                                                     xaxis.x, yaxis.x, zaxis.x, pos.x,
@@ -140,11 +138,10 @@ Shader "myProject/renderBalls" {
 
                     /*
                     정점의 위치가 변하면, normal vector 도 변환해주어야 한다
-
                     노멀벡터는 월드 변환의 [L | t] 에서 이동변환을 제외한 L 에 대해서만 생각
-                    
                     => normal 의 경우엔 inverse trasnpose 를 이용하여 변환한다. 즉 (L^-1)^T
-                    그런데, 이 변환의 경우 비균등 확대축소 없이, 그냥 이동,회전 만 있는 강체변환 이니까, 변환을 노멀에 그대로 적용해도 된다
+                    그런데, 이 변환의 경우 비균등 확대축소 없이, 그냥 이동,회전 만 있는 강체변환 이니까, 
+                    변환을 노멀에 그대로 적용해도 된다
                     그럼 노멀 벡터도 월드 공간으로 변환이 이루어 졌다
                     */
                     v.normal = mul(L, v.normal);
@@ -227,7 +224,7 @@ Shader "myProject/renderBalls" {
                     //smoothsteop => 부드러운 보간
                     float fragZ = smoothstep(-limitSize.z, limitSize.z, i.vertexWorld.z) * 0.5;
                     // 가까울 수록 밝게 보이고 싶다
-                    finalColor *= (1 - fragZ);
+                    finalColor.xyz *= (1 - fragZ);
 
 
 

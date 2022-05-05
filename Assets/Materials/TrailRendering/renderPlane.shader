@@ -91,10 +91,12 @@ Shader "myProject/renderPlane"
 
                                 
                 // 해당 plane 의 most top 의 중점 위치
-                float3 topPos = ( vertexBuffer[topLeftIndex].position + vertexBuffer[topRightIndex].position ) / 2;
+                float3 topPos = ( vertexBuffer[topLeftIndex].position 
+                                  + vertexBuffer[topRightIndex].position ) / 2;
 
                 // plane 의 most bottom 의 중점 위치
-                float3 bottomPos = ( vertexBuffer[bottomLeftIndex].position + vertexBuffer[bottomRightIndex].position ) / 2;
+                float3 bottomPos = ( vertexBuffer[bottomLeftIndex].position 
+                                     + vertexBuffer[bottomRightIndex].position ) / 2;
                 
 
                 // 전체 plane 의 길이
